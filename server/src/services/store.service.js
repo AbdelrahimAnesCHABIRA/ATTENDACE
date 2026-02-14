@@ -1,6 +1,7 @@
 const {
   db,
   stmts,
+  syncToCloud,
   serializeSession,
   deserializeSession,
   serializeTeacher,
@@ -223,6 +224,8 @@ function flushAllStores() {
   } catch (e) {
     console.warn('[DB] WAL checkpoint error:', e.message);
   }
+  // Push changes to Turso cloud
+  syncToCloud();
 }
 
 function closeDatabase() {

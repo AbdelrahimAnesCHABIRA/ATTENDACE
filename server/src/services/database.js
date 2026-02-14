@@ -13,7 +13,7 @@
  *  - json_stores     — generic key-value for schedules, courses, etc.
  */
 
-const Database = require('better-sqlite3');
+const Database = require('libsql');
 const path = require('path');
 const fs = require('fs');
 
@@ -24,16 +24,22 @@ if (!fs.existsSync(DB_DIR)) {
 }
 const DB_PATH = path.join(DB_DIR, 'attendance.db');
 
-// Open database
-const db = new Database(DB_PATH);
+// Open database — with optional Turso cloud sync for persistent storage
+const syncOptions = {};
+if (process.env.TURSO_DATABASE_URL) {
+  syncOptions.syncUrl = process.env.TURSO_DATABASE_URL;
+  syncOptions.authToken = process.env.TURSO_AUTH_TOKEN || '';
+}
+
+const db = new Database(DB_PATH, syncOptions);
 
 // ── Performance settings ──
-db.pragma('journal_mode = WAL');          // concurrent reads, fast writes
-db.pragma('synchronous = NORMAL');        // safe + fast (WAL protects against corruption)
+try { db.pragma('journal_mode = WAL'); } catch (e) { /* libsql manages replication mode */ }
+db.pragma('synchronous = NORMAL');
 db.pragma('cache_size = -64000');         // 64 MB page cache
 db.pragma('busy_timeout = 5000');         // wait 5s if locked
 db.pragma('temp_store = MEMORY');         // temp tables in RAM
-db.pragma('mmap_size = 268435456');       // 256 MB mmap for fast reads
+try { db.pragma('mmap_size = 268435456'); } catch (e) { /* not critical */ }
 db.pragma('foreign_keys = ON');
 
 // ── Schema ──
@@ -394,9 +400,38 @@ function deserializeCheating(row) {
   };
 }
 
+/**
+ * Sync local database with Turso cloud.
+ * Called at startup (pull remote data) and periodically (push local changes).
+ */
+async function syncDatabase() {
+  if (!process.env.TURSO_DATABASE_URL) {
+    console.log('[DB] No TURSO_DATABASE_URL — using local SQLite only');
+    return;
+  }
+  try {
+    console.log('[DB] Syncing with Turso cloud...');
+    await db.sync();
+    console.log('[DB] Sync complete');
+  } catch (e) {
+    console.error('[DB] Sync error:', e.message);
+  }
+}
+
+/**
+ * Fire-and-forget sync to cloud (non-blocking).
+ * Called after writes (cleanup, flush) to push changes.
+ */
+function syncToCloud() {
+  if (!process.env.TURSO_DATABASE_URL) return;
+  db.sync().catch(e => console.warn('[DB] Background sync error:', e.message));
+}
+
 module.exports = {
   db,
   stmts,
+  syncDatabase,
+  syncToCloud,
   serializeSession,
   deserializeSession,
   serializeTeacher,

@@ -8,7 +8,7 @@
  * 4. Report memory and DB stats
  */
 
-const { db, stmts } = require('./database');
+const { db, stmts, syncToCloud } = require('./database');
 const { getStoreStats } = require('./store.service');
 
 // ── Timing constants ──
@@ -64,6 +64,9 @@ function cleanup() {
       `${stats.cheatingPurged} cheating purged, ${stats.qrStripped} QR stripped`
     );
   }
+
+  // Push cleanup changes to Turso cloud
+  syncToCloud();
 
   return stats;
 }

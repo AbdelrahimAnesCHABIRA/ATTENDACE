@@ -13,6 +13,7 @@ import {
   X,
   Maximize2,
   Minimize2,
+  MapPin,
 } from 'lucide-react';
 
 const SESSION_TYPES = ['lecture', 'td', 'lab'];
@@ -31,6 +32,7 @@ export default function QRCodes() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [loadingQR, setLoadingQR] = useState(null);
   const [fullscreenQR, setFullscreenQR] = useState(null); // { qrCodeDataUrl, subjectName, sessionType, year, sectionOrGroup, expiresAt, attendeeCount, sessionId, attendanceUrl }
+  const [locationStatus, setLocationStatus] = useState('idle'); // idle, requesting, captured, denied
 
   const [form, setForm] = useState({
     sessionType: prefill?.sessionType || 'lecture',
@@ -76,6 +78,30 @@ export default function QRCodes() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [fullscreenQR]);
+
+  // Auto-capture teacher's GPS when generate form opens
+  useEffect(() => {
+    if (!showGenerate) {
+      setLocationStatus('idle');
+      return;
+    }
+    setLocationStatus('requesting');
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setForm(f => ({
+            ...f,
+            classroomLocation: { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          }));
+          setLocationStatus('captured');
+        },
+        () => setLocationStatus('denied'),
+        { enableHighAccuracy: true, timeout: 15000 }
+      );
+    } else {
+      setLocationStatus('denied');
+    }
+  }, [showGenerate]);
 
   const handleGenerate = async (e) => {
     e.preventDefault();
@@ -325,6 +351,40 @@ export default function QRCodes() {
                   <label className="form-label">{form.sessionType === 'lecture' ? 'Section' : 'Group'}</label>
                   <input className="form-input" value={form.sectionOrGroup} onChange={e => setForm({ ...form, sectionOrGroup: e.target.value })} placeholder={form.sessionType === 'lecture' ? '1' : 'A'} required />
                 </div>
+              </div>
+              <div className="form-group" style={{ marginTop: 4 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <MapPin size={14} /> Classroom Location
+                </label>
+                {locationStatus === 'requesting' && (
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '8px 12px', background: '#f8fafc', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Getting your location...
+                  </div>
+                )}
+                {locationStatus === 'captured' && form.classroomLocation && (
+                  <div style={{ fontSize: 13, color: '#059669', padding: '8px 12px', background: '#ecfdf5', borderRadius: 8 }}>
+                    <strong>\u2713 Location captured</strong> ({form.classroomLocation.lat.toFixed(5)}, {form.classroomLocation.lng.toFixed(5)})
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Geofence radius:</span>
+                      <input
+                        type="number"
+                        className="form-input"
+                        style={{ width: 80, padding: '4px 8px', fontSize: 13 }}
+                        value={form.geofenceRadius}
+                        onChange={e => setForm({ ...form, geofenceRadius: e.target.value })}
+                        min={50}
+                        max={1000}
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>meters</span>
+                    </div>
+                  </div>
+                )}
+                {locationStatus === 'denied' && (
+                  <div style={{ fontSize: 13, color: '#dc2626', padding: '8px 12px', background: '#fef2f2', borderRadius: 8 }}>
+                    \u26a0 Location access denied \u2014 geofencing will be <strong>disabled</strong> for this session.
+                    <br /><span style={{ fontSize: 12 }}>Students can submit from anywhere.</span>
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 24 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowGenerate(false)}>Cancel</button>

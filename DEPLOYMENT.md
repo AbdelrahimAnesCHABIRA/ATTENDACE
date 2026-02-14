@@ -37,7 +37,33 @@ git push -u origin main
 
 ---
 
-## Step 3: Set Environment Variables
+## Step 3: Set Up Turso Database (Free Persistent Storage)
+
+Turso provides a free cloud SQLite database so your data persists permanently across Render deploys.
+
+### Create a Turso account and database:
+
+1. Go to [turso.tech](https://turso.tech) and sign up (free — 9GB storage, 500M reads/month)
+2. Install the Turso CLI:
+   ```bash
+   # macOS/Linux
+   curl -sSfL https://get.tur.so/install.sh | bash
+   
+   # Windows (PowerShell)
+   iwr https://get.tur.so/install.ps1 -useb | iex
+   ```
+3. Login: `turso auth login`
+4. Create database: `turso db create attendqr`
+5. Get the URL: `turso db show attendqr --url`
+   - Returns something like: `libsql://attendqr-yourusername.turso.io`
+6. Create an auth token: `turso db tokens create attendqr`
+   - Returns a long JWT token
+
+Save both values for the next step.
+
+---
+
+## Step 4: Set Environment Variables
 
 In Render dashboard → your service → **Environment** tab, add these:
 
@@ -48,13 +74,15 @@ In Render dashboard → your service → **Environment** tab, add these:
 | `JWT_SECRET`              | *(click Generate — any random string)*                   |
 | `GOOGLE_CLIENT_ID`        | `592164783674-led5skri5plsd3a7t42dtd4jqhmcfigv.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET`    | `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`                   |
-| `GOOGLE_REDIRECT_URI`     | `https://attendqr.onrender.com/api/auth/google/callback` |
-| `CLIENT_URL`              | `https://attendqr.onrender.com`                          |
+| `GOOGLE_REDIRECT_URI`     | `https://attendqr-m2ec.onrender.com/api/auth/google/callback` |
+| `CLIENT_URL`              | `https://attendqr-m2ec.onrender.com`                          |
 | `DEFAULT_GEOFENCE_RADIUS` | `100`                                                    |
 | `QR_CODE_VALIDITY_MINUTES`| `15`                                                     |
 | `ACADEMIC_YEAR`           | `2025-2026`                                              |
+| `TURSO_DATABASE_URL`      | `libsql://attendqr-yourusername.turso.io` *(from step 3)* |
+| `TURSO_AUTH_TOKEN`        | *(the JWT token from step 3)*                            |
 
-> **Important:** Replace `attendqr` in the URLs with your actual Render service name if different.
+> **Important:** These URLs use your actual Render service name `attendqr-m2ec`.
 
 ---
 
@@ -64,11 +92,11 @@ In Render dashboard → your service → **Environment** tab, add these:
 2. Click on your OAuth 2.0 Client ID
 3. Under **Authorized redirect URIs**, add:
    ```
-   https://attendqr.onrender.com/api/auth/google/callback
+   https://attendqr-m2ec.onrender.com/api/auth/google/callback
    ```
 4. Under **Authorized JavaScript origins**, add:
    ```
-   https://attendqr.onrender.com
+   https://attendqr-m2ec.onrender.com
    ```
 5. Click **Save**
 
@@ -88,7 +116,7 @@ Click **Deploy** in Render. The build will:
 
 First deploy takes ~3-5 minutes. The app will be live at:
 ```
-https://attendqr.onrender.com
+https://attendqr-m2ec.onrender.com
 ```
 
 ---
@@ -100,10 +128,14 @@ https://attendqr.onrender.com
 - **Ephemeral disk**: SQLite database resets on each deploy. This is fine for testing — all data (teachers, sessions, attendance) will be recreated as you use the app.
 - **750 hours/month**: Enough for one service running 24/7.
 
-### SQLite on Render Free Tier
-The SQLite database lives in ephemeral storage. Data persists across server restarts but **resets on new deploys**. For production with persistent data:
-- Upgrade to Render's paid tier ($7/mo) which has persistent disks
-- Or migrate to PostgreSQL (Render offers free PostgreSQL for 90 days)
+### SQLite + Turso Cloud Sync
+The app uses SQLite locally with **Turso cloud sync**. On each deploy:
+1. Server starts → syncs from Turso cloud → gets all previous data
+2. Runs normally with fast local SQLite reads/writes
+3. Periodically syncs changes back to Turso cloud
+4. On shutdown, final sync pushes remaining changes
+
+**Data is permanent** — survives Render redeploys, server restarts, and cold starts. Turso free tier gives 9GB storage and 500M reads/month.
 
 ### QR Codes & Student Access
 Students access the attendance form by scanning QR codes on their phones. They don't need accounts — the QR URL points directly to your Render URL. Make sure the Render URL is accessible from the university network.

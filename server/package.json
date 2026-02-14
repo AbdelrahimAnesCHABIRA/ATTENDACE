@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^12.6.2",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -21,6 +20,7 @@
     "googleapis": "^128.0.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "libsql": "^0.5.22",
     "morgan": "^1.10.0",
     "node-cron": "^3.0.3",
     "qrcode": "^1.5.3",
@@ -29,5 +29,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
+  },
+  "optionalDependencies": {
+    "@libsql/win32-x64-msvc": "^0.5.22"
   }
 }

@@ -138,31 +138,36 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server
-const PORT = config.port;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} in ${config.nodeEnv} mode`);
-  // Start periodic resource cleanup (every 5 min)
-  ResourceManager.startPeriodicCleanup(5 * 60 * 1000);
-});
+// Boot server (async for initial database sync with Turso)
+(async () => {
+  const { syncDatabase } = require('./services/database');
+  await syncDatabase();
 
-// Increase keep-alive for concurrent connections
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
+  const PORT = config.port;
+  const server = app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT} in ${config.nodeEnv} mode`);
+    // Start periodic resource cleanup (every 5 min)
+    ResourceManager.startPeriodicCleanup(5 * 60 * 1000);
+  });
 
-// Graceful shutdown — flush cached data to disk
-function shutdown(signal) {
-  console.log(`\n${signal} received. Closing database...`);
-  ResourceManager.stopPeriodicCleanup();
-  flushAllStores();   // WAL checkpoint
-  closeDatabase();    // Close SQLite connection
-  console.log('Database closed. Shutting down.');
-  server.close(() => process.exit(0));
-  // Force exit after 5s
-  setTimeout(() => process.exit(1), 5000);
-}
+  // Increase keep-alive for concurrent connections
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+  // Graceful shutdown — flush cached data to disk + sync to cloud
+  function shutdown(signal) {
+    console.log(`\n${signal} received. Closing database...`);
+    ResourceManager.stopPeriodicCleanup();
+    flushAllStores();   // WAL checkpoint + cloud sync
+    closeDatabase();    // Close SQLite connection
+    console.log('Database closed. Shutting down.');
+    server.close(() => process.exit(0));
+    // Force exit after 5s
+    setTimeout(() => process.exit(1), 5000);
+  }
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+})();
 
 module.exports = app;
