@@ -1,159 +1,292 @@
-const fs = require('fs');
-const path = require('path');
-const cache = require('./cache.service');
+const {
+  db,
+  stmts,
+  serializeSession,
+  deserializeSession,
+  serializeTeacher,
+  deserializeTeacher,
+  serializeAttendance,
+  deserializeAttendance,
+  deserializeCheating,
+} = require('./database');
 
 /**
- * JSON file-based store with in-memory cache.
- * Reads hit cache; writes update cache and debounce to disk.
+ * SQLite-backed data store.
+ * All reads/writes go directly to the database — no JSON files, no manual caching.
+ * SQLite WAL mode + page cache handles performance.
  */
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// ══════════════ Teachers ══════════════
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function getFilePath(storeName) {
-  return path.join(DATA_DIR, `${storeName}.json`);
-}
-
-function readFromDisk(storeName) {
-  const filePath = getFilePath(storeName);
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, JSON.stringify([], null, 2));
-    return [];
-  }
-  const data = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(data);
-}
-
-function writeToDisk(storeName, data) {
-  const filePath = getFilePath(storeName);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
-// Cached read — returns data from memory, falls back to disk
-function readStore(storeName) {
-  return cache.get(storeName, () => readFromDisk(storeName));
-}
-
-// Cached write — updates memory immediately, debounces disk write
-function writeStore(storeName, data) {
-  cache.set(storeName, data, (d) => writeToDisk(storeName, d));
-}
-
-// Force immediate disk write (for critical data)
-function writeStoreImmediate(storeName, data) {
-  cache.set(storeName, data, (d) => writeToDisk(storeName, d));
-  cache.flush(storeName, (d) => writeToDisk(storeName, d));
-}
-
-// Teacher store
 function getTeacherStore() {
-  return readStore('teachers');
-}
-
-function saveTeacherStore(data) {
-  writeStore('teachers', data);
+  return stmts.getAllTeachers.all().map(deserializeTeacher);
 }
 
 function findTeacherByEmail(email) {
-  const teachers = getTeacherStore();
-  return teachers.find(t => t.email === email);
+  return deserializeTeacher(stmts.findTeacherByEmail.get(email));
 }
 
 function findTeacherById(id) {
-  const teachers = getTeacherStore();
-  return teachers.find(t => t.id === id);
+  return deserializeTeacher(stmts.findTeacherById.get(id));
 }
 
 function addTeacher(teacher) {
-  const teachers = getTeacherStore();
-  teachers.push(teacher);
-  writeStoreImmediate('teachers', teachers); // critical — flush immediately
+  stmts.insertTeacher.run(serializeTeacher(teacher));
   return teacher;
 }
 
 function updateTeacher(id, updates) {
-  const teachers = getTeacherStore();
-  const index = teachers.findIndex(t => t.id === id);
-  if (index === -1) return null;
-  teachers[index] = { ...teachers[index], ...updates };
-  writeStoreImmediate('teachers', teachers); // critical — flush immediately
-  return teachers[index];
+  const existing = findTeacherById(id);
+  if (!existing) return null;
+  const merged = { ...existing, ...updates };
+  const row = serializeTeacher(merged);
+  row.id = id;
+  stmts.updateTeacher.run(row);
+  return merged;
 }
 
-// Session store (active QR sessions)
-function getSessionStore() {
-  return readStore('sessions');
+// ══════════════ Sessions ══════════════
+
+function addSession(session) {
+  stmts.insertSession.run(serializeSession(session));
+  return session;
 }
 
-function saveSessionStore(data) {
-  writeStore('sessions', data);
+function getSession(sessionId) {
+  return deserializeSession(stmts.getSession.get(sessionId));
 }
 
-// Schedule store
-function getScheduleStore() {
-  return readStore('schedules');
-}
+function updateSessionFields(sessionId, updates) {
+  // Build a partial update — only set non-undefined fields
+  const current = stmts.getSession.get(sessionId);
+  if (!current) return null;
+  const deserialized = deserializeSession(current);
+  const merged = { ...deserialized, ...updates };
+  const params = serializeSession(merged);
+  params.id = sessionId;
+  // Also handle explicit fields not in serializeSession mapping
+  if (updates.deactivatedAt !== undefined) params.deactivated_at = updates.deactivatedAt;
+  if (updates.isActive !== undefined) params.is_active = updates.isActive ? 1 : 0;
 
-function saveScheduleStore(data) {
-  writeStore('schedules', data);
-}
-
-// Attendance records store
-function getAttendanceStore() {
-  return readStore('attendance');
-}
-
-function saveAttendanceStore(data) {
-  writeStore('attendance', data);
-}
-
-// Cheating logs store
-function getCheatingStore() {
-  return readStore('cheating_logs');
-}
-
-function saveCheatingStore(data) {
-  writeStore('cheating_logs', data);
-}
-
-// Courses store
-function getCourseStore() {
-  return readStore('courses');
-}
-
-function saveCourseStore(data) {
-  writeStore('courses', data);
-}
-
-// Flush all pending writes to disk (call on shutdown)
-function flushAllStores() {
-  const writers = {};
-  ['teachers', 'sessions', 'schedules', 'attendance', 'cheating_logs', 'courses'].forEach(name => {
-    writers[name] = (d) => writeToDisk(name, d);
+  stmts.updateSession.run({
+    id: sessionId,
+    spreadsheet_id: params.spreadsheet_id,
+    spreadsheet_url: params.spreadsheet_url,
+    drive_folder: params.drive_folder,
+    qr_code_data_url: params.qr_code_data_url,
+    attendance_url: params.attendance_url,
+    is_active: params.is_active,
+    deactivated_at: params.deactivated_at || null,
+    expires_at: params.expires_at,
+    attendee_count: params.attendee_count,
   });
-  cache.flushAll(writers);
+
+  return { ...deserialized, ...updates };
+}
+
+function deactivateSession(sessionId) {
+  stmts.deactivateSession.run(new Date().toISOString(), sessionId);
+}
+
+function deactivateExpiredSessions() {
+  const now = new Date().toISOString();
+  return stmts.deactivateExpired.run(now, now);
+}
+
+function getActiveSessionsByTeacher(teacherId) {
+  // Auto-expire first
+  deactivateExpiredSessions();
+  return stmts.getActiveSessionsByTeacher.all(teacherId).map(deserializeSession);
+}
+
+function getAllSessionsByTeacher(teacherId) {
+  deactivateExpiredSessions();
+  return stmts.getAllSessionsByTeacher.all(teacherId).map(deserializeSession);
+}
+
+// Attendee tracking (separate table — much cheaper than array manipulation)
+const _updateAttendeeCount = db.prepare('UPDATE sessions SET attendee_count = ? WHERE id = ?');
+
+function addSessionAttendee(sessionId, email) {
+  stmts.addAttendee.run(sessionId, email);
+  const count = stmts.getAttendeeCount.get(sessionId).count;
+  _updateAttendeeCount.run(count, sessionId);
+}
+
+function hasSessionAttendee(sessionId, email) {
+  return !!stmts.hasAttendee.get(sessionId, email);
+}
+
+function getSessionAttendeeEmails(sessionId) {
+  return stmts.getAttendeeEmails.all(sessionId).map(r => r.email);
+}
+
+// ══════════════ Attendance ══════════════
+
+function addAttendanceRecord(record) {
+  const result = stmts.insertAttendance.run(serializeAttendance(record));
+  return result.lastInsertRowid;
+}
+
+function getAttendanceBySession(sessionId) {
+  return stmts.getAttendanceBySession.all(sessionId).map(deserializeAttendance);
+}
+
+function getAttendanceByTeacher(teacherId) {
+  return stmts.getAttendanceBySessions.all(teacherId).map(deserializeAttendance);
+}
+
+function getAttendanceByEmail(email) {
+  return stmts.getAttendanceByEmail.all(email).map(deserializeAttendance);
+}
+
+function markAttendanceSynced(id) {
+  stmts.markAttendanceSynced.run(id);
+}
+
+function getAttendanceStats(sessionId) {
+  return stmts.getAttendanceStats.get(sessionId);
+}
+
+// Backward compat — used by analytics routes
+function getAttendanceStore() {
+  return db.prepare('SELECT * FROM attendance').all().map(deserializeAttendance);
+}
+
+function saveAttendanceStore() {
+  // No-op — individual inserts handle this now
+}
+
+// ══════════════ Cheating Logs ══════════════
+
+function addCheatingLog(log) {
+  const result = stmts.insertCheatingLog.run({
+    session_id: log.sessionId || null,
+    student_name: log.studentName,
+    email: log.email,
+    violation_type: log.violationType || null,
+    details: log.details || null,
+    distance: log.distance != null ? log.distance : null,
+    ip_address: log.ipAddress || null,
+    mac_address: log.macAddress || null,
+    timestamp: log.timestamp || new Date().toISOString(),
+  });
+  return result.lastInsertRowid;
+}
+
+function getCheatingBySession(sessionId) {
+  return stmts.getCheatingBySession.all(sessionId).map(deserializeCheating);
+}
+
+function getCheatingByEmail(email) {
+  return stmts.getCheatingByEmail.all(email).map(deserializeCheating);
+}
+
+function markCheatingSynced(id) {
+  stmts.markCheatingSynced.run(id);
+}
+
+// Backward compat
+function getCheatingStore() {
+  return stmts.getAllCheatingLogs.all().map(deserializeCheating);
+}
+
+function saveCheatingStore() {
+  // No-op
+}
+
+// ══════════════ JSON Generic Stores ══════════════
+// (schedules, courses — small data, keep as JSON blobs)
+
+function getJsonStore(name) {
+  const row = stmts.getJsonStore.get(name);
+  if (!row) return [];
+  try { return JSON.parse(row.data); } catch { return []; }
+}
+
+function saveJsonStore(name, data) {
+  const json = JSON.stringify(data);
+  stmts.upsertJsonStore.run(name, json, json);
+}
+
+function getScheduleStore() { return getJsonStore('schedules'); }
+function saveScheduleStore(data) { saveJsonStore('schedules', data); }
+function getCourseStore() { return getJsonStore('courses'); }
+function saveCourseStore(data) { saveJsonStore('courses', data); }
+
+// ══════════════ Shutdown ══════════════
+
+function flushAllStores() {
+  // SQLite writes are durable already. Just checkpoint WAL.
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (e) {
+    console.warn('[DB] WAL checkpoint error:', e.message);
+  }
+}
+
+function closeDatabase() {
+  flushAllStores();
+  db.close();
+}
+
+// ══════════════ Stats ══════════════
+
+function getStoreStats() {
+  return {
+    attendance: stmts.countAttendance.get().count,
+    sessions: db.prepare('SELECT COUNT(*) as count FROM sessions').get().count,
+    cheating: stmts.countCheating.get().count,
+    teachers: db.prepare('SELECT COUNT(*) as count FROM teachers').get().count,
+  };
 }
 
 module.exports = {
+  // Teacher
   getTeacherStore,
-  saveTeacherStore,
   findTeacherByEmail,
   findTeacherById,
   addTeacher,
   updateTeacher,
-  getSessionStore,
-  saveSessionStore,
+
+  // Session (new targeted methods)
+  addSession,
+  getSession,
+  updateSessionFields,
+  deactivateSession,
+  deactivateExpiredSessions,
+  getActiveSessionsByTeacher,
+  getAllSessionsByTeacher,
+  addSessionAttendee,
+  hasSessionAttendee,
+  getSessionAttendeeEmails,
+
+  // Attendance (new targeted + backward compat)
+  addAttendanceRecord,
+  getAttendanceBySession,
+  getAttendanceByTeacher,
+  getAttendanceByEmail,
+  markAttendanceSynced,
+  getAttendanceStats,
+  getAttendanceStore,      // backward compat (analytics)
+  saveAttendanceStore,     // no-op
+
+  // Cheating (new targeted + backward compat)
+  addCheatingLog,
+  getCheatingBySession,
+  getCheatingByEmail,
+  markCheatingSynced,
+  getCheatingStore,        // backward compat
+  saveCheatingStore,       // no-op
+
+  // JSON stores (schedules, courses)
   getScheduleStore,
   saveScheduleStore,
-  getAttendanceStore,
-  saveAttendanceStore,
-  getCheatingStore,
-  saveCheatingStore,
   getCourseStore,
   saveCourseStore,
+
+  // Lifecycle
   flushAllStores,
+  closeDatabase,
+  getStoreStats,
 };

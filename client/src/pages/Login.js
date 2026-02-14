@@ -17,7 +17,7 @@ export default function Login() {
     } catch (err) {
       console.error('Google auth error:', err);
       if (!err.response) {
-        alert('Cannot reach the server. Make sure the backend is running on http://localhost:5000');
+        alert('Cannot reach the server. Please try again later.');
       } else {
         alert('Login failed: ' + (err.response?.data?.error || err.message));
       }

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: attendqr
+    runtime: node
+    plan: free
+    buildCommand: npm run render:build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_OPTIONS
+        value: --openssl-legacy-provider
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: DEFAULT_GEOFENCE_RADIUS
+        value: "100"
+      - key: QR_CODE_VALIDITY_MINUTES
+        value: "15"
+      - key: ACADEMIC_YEAR
+        value: "2025-2026"

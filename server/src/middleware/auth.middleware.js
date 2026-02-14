@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const { getTeacherStore } = require('../services/store.service');
+const { findTeacherById } = require('../services/store.service');
 
 /**
  * Authentication middleware - verifies JWT token

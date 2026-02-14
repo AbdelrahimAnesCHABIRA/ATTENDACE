@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticate, requireTeacher } = require('../middleware/auth.middleware');
 const SessionService = require('../services/session.service');
-const { getAttendanceStore } = require('../services/store.service');
+const { getAttendanceByTeacher } = require('../services/store.service');
 
 const router = express.Router();
 
@@ -11,9 +11,7 @@ const router = express.Router();
  */
 router.get('/overview', authenticate, requireTeacher, (req, res) => {
   const allSessions = SessionService.getAllSessionsForTeacher(req.user.id);
-  const attendance = getAttendanceStore();
-  const sessionIds = allSessions.map(s => s.id);
-  const myAttendance = attendance.filter(r => sessionIds.includes(r.sessionId));
+  const myAttendance = getAttendanceByTeacher(req.user.id);
 
   // Today's stats
   const today = new Date().toISOString().split('T')[0];
@@ -59,10 +57,8 @@ router.get('/overview', authenticate, requireTeacher, (req, res) => {
  */
 router.get('/trends', authenticate, requireTeacher, (req, res) => {
   const days = parseInt(req.query.days) || 30;
-  const attendance = getAttendanceStore();
   const allSessions = SessionService.getAllSessionsForTeacher(req.user.id);
-  const sessionIds = allSessions.map(s => s.id);
-  const myAttendance = attendance.filter(r => sessionIds.includes(r.sessionId));
+  const myAttendance = getAttendanceByTeacher(req.user.id);
 
   // Group by date
   const trends = {};
@@ -105,7 +101,7 @@ router.get('/trends', authenticate, requireTeacher, (req, res) => {
  */
 router.get('/courses', authenticate, requireTeacher, (req, res) => {
   const allSessions = SessionService.getAllSessionsForTeacher(req.user.id);
-  const attendance = getAttendanceStore();
+  const attendance = getAttendanceByTeacher(req.user.id);
 
   const courses = {};
   allSessions.forEach(session => {
@@ -146,9 +142,7 @@ router.get('/courses', authenticate, requireTeacher, (req, res) => {
 router.get('/low-attendance', authenticate, requireTeacher, (req, res) => {
   const threshold = parseInt(req.query.threshold) || 70;
   const allSessions = SessionService.getAllSessionsForTeacher(req.user.id);
-  const attendance = getAttendanceStore();
-  const sessionIds = allSessions.map(s => s.id);
-  const myAttendance = attendance.filter(r => sessionIds.includes(r.sessionId));
+  const myAttendance = getAttendanceByTeacher(req.user.id);
 
   // Count attendance per student
   const studentStats = {};

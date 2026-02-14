@@ -1,6 +1,12 @@
 const geolib = require('geolib');
 const config = require('../config');
-const { getAttendanceStore, saveAttendanceStore, getCheatingStore, saveCheatingStore } = require('./store.service');
+const {
+  getAttendanceBySession,
+  addCheatingLog,
+  getCheatingStore,
+  getCheatingBySession,
+  getCheatingByEmail,
+} = require('./store.service');
 
 /**
  * Anti-Cheating Service
@@ -42,8 +48,7 @@ class AntiCheatingService {
    * @returns {{ isDuplicate: boolean, duplicateOf: string[] }}
    */
   static checkDuplicateDevice(sessionId, ipAddress, macAddress) {
-    const attendance = getAttendanceStore();
-    const sessionRecords = attendance.filter(r => r.sessionId === sessionId);
+    const sessionRecords = getAttendanceBySession(sessionId);
 
     const duplicates = sessionRecords.filter(r =>
       (ipAddress && r.ipAddress === ipAddress) ||
@@ -120,25 +125,24 @@ class AntiCheatingService {
         });
       }
 
-      // Also flag previous duplicates
-      if (duplicateResult.isDuplicate) {
-        for (const dupEmail of duplicateResult.duplicateOf) {
-          const existingRecord = getAttendanceStore().find(
-            r => r.sessionId === sessionId && r.email === dupEmail
-          );
-          if (existingRecord) {
-            this.logViolation({
-              timestamp: new Date().toISOString(),
-              sessionId,
-              studentName: existingRecord.studentName,
-              email: dupEmail,
-              violationType: 'Duplicate Device',
-              details: `Same device used by ${studentName} (${email})`,
-              distance: 0,
-              ipAddress,
-              macAddress,
-            });
-          }
+      // Also flag the FIRST previous duplicate (limit to avoid O(N²) with shared WiFi)
+      if (duplicateResult.isDuplicate && duplicateResult.duplicateOf.length > 0) {
+        // Only back-flag the first matching student, not all N
+        const firstDupEmail = duplicateResult.duplicateOf[0];
+        const records = getAttendanceBySession(sessionId);
+        const existingRecord = records.find(r => r.email === firstDupEmail);
+        if (existingRecord) {
+          this.logViolation({
+            timestamp: new Date().toISOString(),
+            sessionId,
+            studentName: existingRecord.studentName,
+            email: firstDupEmail,
+            violationType: 'Duplicate Device',
+            details: `Same device used by ${studentName} (${email})`,
+            distance: 0,
+            ipAddress,
+            macAddress,
+          });
         }
       }
     }
@@ -155,12 +159,7 @@ class AntiCheatingService {
    * Log a violation to the cheating store
    */
   static logViolation(violation) {
-    const logs = getCheatingStore();
-    logs.push({
-      id: Date.now().toString(),
-      ...violation,
-    });
-    saveCheatingStore(logs);
+    addCheatingLog(violation);
   }
 
   /**

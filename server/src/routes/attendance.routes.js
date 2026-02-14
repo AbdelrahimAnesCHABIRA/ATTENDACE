@@ -8,8 +8,11 @@ const DriveService = require('../services/drive.service');
 const { attendanceQueue } = require('../services/queue.service');
 const {
   findTeacherById,
-  getAttendanceStore,
-  saveAttendanceStore,
+  addAttendanceRecord,
+  markAttendanceSynced,
+  getAttendanceBySession,
+  getAttendanceByEmail,
+  getAttendanceByTeacher,
 } = require('../services/store.service');
 
 const router = express.Router();
@@ -68,7 +71,7 @@ router.post(
         geofenceRadius: session.geofenceRadius,
       });
 
-      // 4. Record attendance locally (writes to cache, debounced disk)
+      // 4. Record attendance in SQLite (instant)
       const record = {
         sessionId,
         studentName,
@@ -82,9 +85,7 @@ router.post(
         violations: validationResult.violations,
       };
 
-      const attendance = getAttendanceStore();
-      attendance.push(record);
-      saveAttendanceStore(attendance);
+      const recordId = addAttendanceRecord(record);
 
       // Update session attendee count (cache)
       SessionService.addAttendee(sessionId, email);
@@ -92,13 +93,15 @@ router.post(
       // ── RESPOND INSTANTLY ──
       res.json({ success: true, message: 'Attendance submitted successfully' });
 
-      // 5. Queue Drive write in background (non-blocking)
+      // 5. Queue Drive write — keyed by sessionId (parallel across sessions, sequential within)
       if (session.spreadsheetId) {
-        attendanceQueue.enqueue(async () => {
-          try {
+        const config = require('../config');
+
+        // Attendance record → Sheets (freed from memory after sync via ResourceManager)
+        attendanceQueue.enqueue(
+          async () => {
             const teacher = findTeacherById(session.teacherId);
             if (!teacher?.googleTokens) return;
-
             const driveService = new DriveService(teacher.googleTokens.access_token);
             await driveService.appendAttendanceRecord(session.spreadsheetId, {
               timestamp: record.timestamp,
@@ -110,10 +113,19 @@ router.post(
               latitude: record.latitude,
               longitude: record.longitude,
             });
+          },
+          `attendance-${sessionId}-${email}`,
+          sessionId,
+          { onSuccess: () => { markAttendanceSynced(recordId); } }
+        );
 
-            // If flagged, queue violation log
-            if (!validationResult.isValid) {
-              const config = require('../config');
+        // Violation logging — separate queue item (can fail independently)
+        if (!validationResult.isValid) {
+          attendanceQueue.enqueue(
+            async () => {
+              const teacher = findTeacherById(session.teacherId);
+              if (!teacher?.googleTokens) return;
+              const driveService = new DriveService(teacher.googleTokens.access_token);
               const cheatingSheetId = await driveService.getOrCreateCheatingLog(config.academicYear);
               for (const v of validationResult.violations) {
                 await driveService.logViolation(cheatingSheetId, {
@@ -127,11 +139,11 @@ router.post(
                   macAddress: record.macAddress,
                 });
               }
-            }
-          } catch (err) {
-            console.error('[AttendanceQueue] Drive write failed:', err.message);
-          }
-        }, `attendance-${sessionId}-${email}`);
+            },
+            `violation-${sessionId}-${email}`,
+            `violations-${session.teacherId}`
+          );
+        }
       }
     } catch (error) {
       console.error('Attendance submit error:', error);
@@ -145,8 +157,7 @@ router.post(
  * Get attendance records for a specific session (teacher only)
  */
 router.get('/session/:sessionId', authenticate, requireTeacher, (req, res) => {
-  const attendance = getAttendanceStore();
-  const sessionRecords = attendance.filter(r => r.sessionId === req.params.sessionId);
+  const sessionRecords = getAttendanceBySession(req.params.sessionId);
   res.json({
     records: sessionRecords,
     total: sessionRecords.length,
@@ -160,8 +171,7 @@ router.get('/session/:sessionId', authenticate, requireTeacher, (req, res) => {
  * Get attendance for a specific student across all sessions (teacher only)
  */
 router.get('/student/:email', authenticate, requireTeacher, (req, res) => {
-  const attendance = getAttendanceStore();
-  const studentRecords = attendance.filter(r => r.email === req.params.email);
+  const studentRecords = getAttendanceByEmail(req.params.email);
   res.json({ records: studentRecords, total: studentRecords.length });
 });
 
@@ -170,11 +180,8 @@ router.get('/student/:email', authenticate, requireTeacher, (req, res) => {
  * Get overall attendance statistics (teacher only)
  */
 router.get('/stats', authenticate, requireTeacher, (req, res) => {
-  const attendance = getAttendanceStore();
   const teacherSessions = SessionService.getAllSessionsForTeacher(req.user.id);
-  const teacherSessionIds = teacherSessions.map(s => s.id);
-
-  const teacherAttendance = attendance.filter(r => teacherSessionIds.includes(r.sessionId));
+  const teacherAttendance = getAttendanceByTeacher(req.user.id);
 
   const totalSessions = teacherSessions.length;
   const totalSubmissions = teacherAttendance.length;
@@ -191,7 +198,7 @@ router.get('/stats', authenticate, requireTeacher, (req, res) => {
       bySessionType[session.sessionType] = { sessions: 0, submissions: 0 };
     }
     bySessionType[session.sessionType].sessions++;
-    bySessionType[session.sessionType].submissions += attendance.filter(
+    bySessionType[session.sessionType].submissions += teacherAttendance.filter(
       r => r.sessionId === session.id
     ).length;
   });

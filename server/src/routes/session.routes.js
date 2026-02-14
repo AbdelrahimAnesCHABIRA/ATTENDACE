@@ -66,8 +66,9 @@ router.post(
       });
 
       // ── BACKGROUND: Create Drive resources and link to session ──
-      driveQueue.enqueue(async () => {
-        try {
+      // Keyed by sessionId — each session setup runs independently in parallel
+      driveQueue.enqueue(
+        async () => {
           const driveService = new DriveService(teacher.googleTokens.access_token);
 
           const folder = await driveService.createFolderStructure(
@@ -87,10 +88,10 @@ router.post(
             spreadsheetUrl: sheet.spreadsheetUrl,
             driveFolder: folder,
           });
-        } catch (driveError) {
-          console.warn(`[Drive-BG] Failed for session ${result.sessionId}:`, driveError.message);
-        }
-      }, `drive-setup-${result.sessionId}`);
+        },
+        `drive-setup-${result.sessionId}`,
+        result.sessionId
+      );
     } catch (error) {
       console.error('QR generation error:', error);
       res.status(500).json({ error: 'Failed to generate QR code' });
