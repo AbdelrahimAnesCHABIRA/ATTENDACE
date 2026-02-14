@@ -416,7 +416,7 @@ async function syncDatabase() {
   }
   try {
     console.log('[DB] Syncing with Turso cloud...');
-    await db.sync();
+    await Promise.resolve(db.sync());
     console.log('[DB] Sync complete');
   } catch (e) {
     console.error('[DB] Sync error (will continue with local DB):', e.message);
@@ -429,7 +429,11 @@ async function syncDatabase() {
  */
 function syncToCloud() {
   if (!hasTurso) return;
-  db.sync().catch(e => console.warn('[DB] Background sync error:', e.message));
+  try {
+    Promise.resolve(db.sync()).catch(e => console.warn('[DB] Background sync error:', e.message));
+  } catch (e) {
+    console.warn('[DB] Background sync error:', e.message);
+  }
 }
 
 module.exports = {
