@@ -25,24 +25,31 @@ if (!fs.existsSync(DB_DIR)) {
 const DB_PATH = path.join(DB_DIR, 'attendance.db');
 
 // Open database — with optional Turso cloud sync for persistent storage
+const hasTurso = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
 const syncOptions = {};
-if (process.env.TURSO_DATABASE_URL) {
+if (hasTurso) {
   syncOptions.syncUrl = process.env.TURSO_DATABASE_URL;
-  syncOptions.authToken = process.env.TURSO_AUTH_TOKEN || '';
+  syncOptions.authToken = process.env.TURSO_AUTH_TOKEN;
+  console.log('[DB] Turso cloud sync enabled:', process.env.TURSO_DATABASE_URL);
+} else {
+  console.log('[DB] Local SQLite only (set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN to enable cloud sync)');
 }
 
 const db = new Database(DB_PATH, syncOptions);
 
 // ── Performance settings ──
-try { db.pragma('journal_mode = WAL'); } catch (e) { /* libsql manages replication mode */ }
-db.pragma('synchronous = NORMAL');
-db.pragma('cache_size = -64000');         // 64 MB page cache
-db.pragma('busy_timeout = 5000');         // wait 5s if locked
-db.pragma('temp_store = MEMORY');         // temp tables in RAM
-try { db.pragma('mmap_size = 268435456'); } catch (e) { /* not critical */ }
-db.pragma('foreign_keys = ON');
+// Wrapped individually — libsql with Turso sync may fail if remote is unreachable
+const safePragma = (p) => { try { db.pragma(p); } catch (e) { console.warn(`[DB] Pragma "${p}" skipped:`, e.message); } };
+safePragma('journal_mode = WAL');
+safePragma('synchronous = NORMAL');
+safePragma('cache_size = -64000');
+safePragma('busy_timeout = 5000');
+safePragma('temp_store = MEMORY');
+safePragma('mmap_size = 268435456');
+safePragma('foreign_keys = ON');
 
 // ── Schema ──
+try {
 db.exec(`
   CREATE TABLE IF NOT EXISTS teachers (
     id TEXT PRIMARY KEY,
@@ -136,6 +143,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_cheating_email
     ON cheating_logs(email);
 `);
+} catch (e) {
+  console.error('[DB] Schema creation error (may be OK if tables exist):', e.message);
+}
 
 // ── Prepared Statements ──
 // (better-sqlite3 caches these internally — this is just for clarity)
@@ -146,16 +156,16 @@ const stmts = {
   findTeacherById: db.prepare('SELECT * FROM teachers WHERE id = ?'),
   insertTeacher: db.prepare(`
     INSERT INTO teachers (id, email, name, picture, google_tokens, settings, created_at)
-    VALUES (@id, @email, @name, @picture, @google_tokens, @settings, @created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
   updateTeacher: db.prepare(`
     UPDATE teachers SET
-      email = COALESCE(@email, email),
-      name = COALESCE(@name, name),
-      picture = COALESCE(@picture, picture),
-      google_tokens = COALESCE(@google_tokens, google_tokens),
-      settings = COALESCE(@settings, settings)
-    WHERE id = @id
+      email = COALESCE(?, email),
+      name = COALESCE(?, name),
+      picture = COALESCE(?, picture),
+      google_tokens = COALESCE(?, google_tokens),
+      settings = COALESCE(?, settings)
+    WHERE id = ?
   `),
   getAllTeachers: db.prepare('SELECT * FROM teachers'),
 
@@ -165,10 +175,7 @@ const stmts = {
       section_or_group, classroom_location, geofence_radius, spreadsheet_id,
       spreadsheet_url, drive_folder, qr_code_data_url, attendance_url,
       created_at, expires_at, is_active, attendee_count)
-    VALUES (@id, @teacher_id, @session_type, @subject_name, @year,
-      @section_or_group, @classroom_location, @geofence_radius, @spreadsheet_id,
-      @spreadsheet_url, @drive_folder, @qr_code_data_url, @attendance_url,
-      @created_at, @expires_at, @is_active, @attendee_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getSession: db.prepare('SELECT * FROM sessions WHERE id = ?'),
   getActiveSessionsByTeacher: db.prepare(
@@ -179,16 +186,16 @@ const stmts = {
   ),
   updateSession: db.prepare(`
     UPDATE sessions SET
-      spreadsheet_id = COALESCE(@spreadsheet_id, spreadsheet_id),
-      spreadsheet_url = COALESCE(@spreadsheet_url, spreadsheet_url),
-      drive_folder = COALESCE(@drive_folder, drive_folder),
-      qr_code_data_url = COALESCE(@qr_code_data_url, qr_code_data_url),
-      attendance_url = COALESCE(@attendance_url, attendance_url),
-      is_active = COALESCE(@is_active, is_active),
-      deactivated_at = COALESCE(@deactivated_at, deactivated_at),
-      expires_at = COALESCE(@expires_at, expires_at),
-      attendee_count = COALESCE(@attendee_count, attendee_count)
-    WHERE id = @id
+      spreadsheet_id = COALESCE(?, spreadsheet_id),
+      spreadsheet_url = COALESCE(?, spreadsheet_url),
+      drive_folder = COALESCE(?, drive_folder),
+      qr_code_data_url = COALESCE(?, qr_code_data_url),
+      attendance_url = COALESCE(?, attendance_url),
+      is_active = COALESCE(?, is_active),
+      deactivated_at = COALESCE(?, deactivated_at),
+      expires_at = COALESCE(?, expires_at),
+      attendee_count = COALESCE(?, attendee_count)
+    WHERE id = ?
   `),
   deactivateSession: db.prepare(
     'UPDATE sessions SET is_active = 0, deactivated_at = ? WHERE id = ?'
@@ -218,8 +225,7 @@ const stmts = {
   insertAttendance: db.prepare(`
     INSERT INTO attendance (session_id, student_name, email, ip_address, mac_address,
       latitude, longitude, timestamp, status, violations, synced)
-    VALUES (@session_id, @student_name, @email, @ip_address, @mac_address,
-      @latitude, @longitude, @timestamp, @status, @violations, 0)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `),
   getAttendanceBySession: db.prepare(
     'SELECT * FROM attendance WHERE session_id = ?'
@@ -252,8 +258,7 @@ const stmts = {
   insertCheatingLog: db.prepare(`
     INSERT INTO cheating_logs (session_id, student_name, email, violation_type,
       details, distance, ip_address, mac_address, timestamp, synced)
-    VALUES (@session_id, @student_name, @email, @violation_type,
-      @details, @distance, @ip_address, @mac_address, @timestamp, 0)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `),
   getCheatingBySession: db.prepare(
     'SELECT * FROM cheating_logs WHERE session_id = ?'
@@ -405,8 +410,8 @@ function deserializeCheating(row) {
  * Called at startup (pull remote data) and periodically (push local changes).
  */
 async function syncDatabase() {
-  if (!process.env.TURSO_DATABASE_URL) {
-    console.log('[DB] No TURSO_DATABASE_URL — using local SQLite only');
+  if (!hasTurso) {
+    console.log('[DB] No Turso credentials — using local SQLite only');
     return;
   }
   try {
@@ -414,7 +419,7 @@ async function syncDatabase() {
     await db.sync();
     console.log('[DB] Sync complete');
   } catch (e) {
-    console.error('[DB] Sync error:', e.message);
+    console.error('[DB] Sync error (will continue with local DB):', e.message);
   }
 }
 
@@ -423,7 +428,7 @@ async function syncDatabase() {
  * Called after writes (cleanup, flush) to push changes.
  */
 function syncToCloud() {
-  if (!process.env.TURSO_DATABASE_URL) return;
+  if (!hasTurso) return;
   db.sync().catch(e => console.warn('[DB] Background sync error:', e.message));
 }
 

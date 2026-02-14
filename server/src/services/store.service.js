@@ -32,7 +32,8 @@ function findTeacherById(id) {
 }
 
 function addTeacher(teacher) {
-  stmts.insertTeacher.run(serializeTeacher(teacher));
+  const t = serializeTeacher(teacher);
+  stmts.insertTeacher.run(t.id, t.email, t.name, t.picture, t.google_tokens, t.settings, t.created_at);
   return teacher;
 }
 
@@ -41,15 +42,20 @@ function updateTeacher(id, updates) {
   if (!existing) return null;
   const merged = { ...existing, ...updates };
   const row = serializeTeacher(merged);
-  row.id = id;
-  stmts.updateTeacher.run(row);
+  stmts.updateTeacher.run(row.email, row.name, row.picture, row.google_tokens, row.settings, id);
   return merged;
 }
 
 // ══════════════ Sessions ══════════════
 
 function addSession(session) {
-  stmts.insertSession.run(serializeSession(session));
+  const s = serializeSession(session);
+  stmts.insertSession.run(
+    s.id, s.teacher_id, s.session_type, s.subject_name, s.year,
+    s.section_or_group, s.classroom_location, s.geofence_radius, s.spreadsheet_id,
+    s.spreadsheet_url, s.drive_folder, s.qr_code_data_url, s.attendance_url,
+    s.created_at, s.expires_at, s.is_active, s.attendee_count
+  );
   return session;
 }
 
@@ -64,23 +70,22 @@ function updateSessionFields(sessionId, updates) {
   const deserialized = deserializeSession(current);
   const merged = { ...deserialized, ...updates };
   const params = serializeSession(merged);
-  params.id = sessionId;
   // Also handle explicit fields not in serializeSession mapping
   if (updates.deactivatedAt !== undefined) params.deactivated_at = updates.deactivatedAt;
   if (updates.isActive !== undefined) params.is_active = updates.isActive ? 1 : 0;
 
-  stmts.updateSession.run({
-    id: sessionId,
-    spreadsheet_id: params.spreadsheet_id,
-    spreadsheet_url: params.spreadsheet_url,
-    drive_folder: params.drive_folder,
-    qr_code_data_url: params.qr_code_data_url,
-    attendance_url: params.attendance_url,
-    is_active: params.is_active,
-    deactivated_at: params.deactivated_at || null,
-    expires_at: params.expires_at,
-    attendee_count: params.attendee_count,
-  });
+  stmts.updateSession.run(
+    params.spreadsheet_id,
+    params.spreadsheet_url,
+    params.drive_folder,
+    params.qr_code_data_url,
+    params.attendance_url,
+    params.is_active,
+    params.deactivated_at || null,
+    params.expires_at,
+    params.attendee_count,
+    sessionId
+  );
 
   return { ...deserialized, ...updates };
 }
@@ -125,7 +130,11 @@ function getSessionAttendeeEmails(sessionId) {
 // ══════════════ Attendance ══════════════
 
 function addAttendanceRecord(record) {
-  const result = stmts.insertAttendance.run(serializeAttendance(record));
+  const r = serializeAttendance(record);
+  const result = stmts.insertAttendance.run(
+    r.session_id, r.student_name, r.email, r.ip_address, r.mac_address,
+    r.latitude, r.longitude, r.timestamp, r.status, r.violations
+  );
   return result.lastInsertRowid;
 }
 
@@ -161,17 +170,17 @@ function saveAttendanceStore() {
 // ══════════════ Cheating Logs ══════════════
 
 function addCheatingLog(log) {
-  const result = stmts.insertCheatingLog.run({
-    session_id: log.sessionId || null,
-    student_name: log.studentName,
-    email: log.email,
-    violation_type: log.violationType || null,
-    details: log.details || null,
-    distance: log.distance != null ? log.distance : null,
-    ip_address: log.ipAddress || null,
-    mac_address: log.macAddress || null,
-    timestamp: log.timestamp || new Date().toISOString(),
-  });
+  const result = stmts.insertCheatingLog.run(
+    log.sessionId || null,
+    log.studentName,
+    log.email,
+    log.violationType || null,
+    log.details || null,
+    log.distance != null ? log.distance : null,
+    log.ipAddress || null,
+    log.macAddress || null,
+    log.timestamp || new Date().toISOString()
+  );
   return result.lastInsertRowid;
 }
 
