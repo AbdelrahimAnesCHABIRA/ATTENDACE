@@ -14,9 +14,7 @@
     "react-qr-code": "^2.0.12",
     "react-router-dom": "^6.20.1",
     "react-scripts": "5.0.1",
-    "recharts": "^2.10.3"
-  },
-  "devDependencies": {
+    "recharts": "^2.10.3",
     "cross-env": "^7.0.3"
   },
   "scripts": {
