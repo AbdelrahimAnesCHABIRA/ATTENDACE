@@ -4,13 +4,16 @@ const { findTeacherById } = require('../services/store.service');
 
 /**
  * Authentication middleware - verifies JWT token
+ * Priority: 1) httpOnly cookie (secure), 2) Authorization header (legacy/API)
  */
 const authenticate = (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.startsWith('Bearer ')
-      ? authHeader.split(' ')[1]
-      : req.cookies?.token;
+    // Prefer httpOnly cookie (secure), fall back to Authorization header
+    const token =
+      req.cookies?.token ||
+      (req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.split(' ')[1]
+        : null);
 
     if (!token) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -21,6 +24,8 @@ const authenticate = (req, res, next) => {
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
+      // Clear expired cookie
+      res.clearCookie('token', { httpOnly: true, path: '/' });
       return res.status(401).json({ error: 'Token expired' });
     }
     return res.status(401).json({ error: 'Invalid token' });

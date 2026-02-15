@@ -9,7 +9,6 @@ export default function AuthCallback() {
   const { login } = useAuth();
 
   useEffect(() => {
-    const token = searchParams.get('token');
     const error = searchParams.get('error');
 
     if (error) {
@@ -17,20 +16,16 @@ export default function AuthCallback() {
       return;
     }
 
-    if (token) {
-      localStorage.setItem('token', token);
-
-      authAPI.getMe()
-        .then(res => {
-          login(token, res.data.user);
-          navigate('/');
-        })
-        .catch(() => {
-          navigate('/login?error=auth_failed');
-        });
-    } else {
-      navigate('/login');
-    }
+    // Cookie was set by the server during OAuth callback.
+    // Just call /me to get user data — cookie is sent automatically.
+    authAPI.getMe()
+      .then(res => {
+        login(res.data.user);
+        navigate('/');
+      })
+      .catch(() => {
+        navigate('/login?error=auth_failed');
+      });
   }, [searchParams, navigate, login]);
 
   return (

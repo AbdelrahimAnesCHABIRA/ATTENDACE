@@ -436,11 +436,27 @@ function syncToCloud() {
   }
 }
 
+/**
+ * Debounced sync — batches rapid writes into a single sync call.
+ * Called after individual data mutations to keep Turso in sync
+ * without hammering the network on every single INSERT.
+ */
+let _syncTimer = null;
+function debouncedSync() {
+  if (!hasTurso) return;
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => {
+    _syncTimer = null;
+    syncToCloud();
+  }, 2000); // 2-second debounce: batches rapid writes
+}
+
 module.exports = {
   db,
   stmts,
   syncDatabase,
   syncToCloud,
+  debouncedSync,
   serializeSession,
   deserializeSession,
   serializeTeacher,

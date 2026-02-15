@@ -12,8 +12,8 @@ const { db, stmts, syncToCloud } = require('./database');
 const { getStoreStats } = require('./store.service');
 
 // ── Timing constants ──
-const SYNC_GRACE_MS = 10 * 60 * 1000;       // 10 min: keep synced records for teacher viewing
-const QR_STRIP_MS = 30 * 60 * 1000;         // 30 min: strip QR data URLs from expired sessions
+const SYNC_GRACE_MS = 30 * 24 * 60 * 60 * 1000;  // 30 days: keep synced records for analytics
+const QR_STRIP_MS = 24 * 60 * 60 * 1000;          // 24 hours: strip QR data URLs from expired sessions
 
 let _cleanupInterval = null;
 

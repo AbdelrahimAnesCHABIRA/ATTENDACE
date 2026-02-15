@@ -4,16 +4,7 @@ const API_URL = process.env.REACT_APP_API_URL || '/api';
 
 const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true,
-});
-
-// Request interceptor - add auth token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,   // send httpOnly cookies with every request
 });
 
 // Response interceptor - handle auth errors
@@ -21,9 +12,9 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      if (window.location.pathname !== '/login') {
+      // Don't redirect if already on login/callback pages
+      const path = window.location.pathname;
+      if (path !== '/login' && path !== '/auth/callback' && !path.startsWith('/attend/')) {
         window.location.href = '/login';
       }
     }
@@ -35,6 +26,7 @@ api.interceptors.response.use(
 export const authAPI = {
   getGoogleAuthUrl: () => api.get('/auth/google'),
   getMe: () => api.get('/auth/me'),
+  logout: () => api.post('/auth/logout'),
   updateSettings: (settings) => api.put('/auth/settings', { settings }),
 };
 

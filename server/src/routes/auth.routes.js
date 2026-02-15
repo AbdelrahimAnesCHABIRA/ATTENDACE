@@ -7,6 +7,15 @@ const { authenticate } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
+// Cookie options for JWT — httpOnly prevents XSS token theft
+const cookieOpts = () => ({
+  httpOnly: true,
+  secure: config.nodeEnv === 'production',   // HTTPS only in prod
+  sameSite: 'lax',                           // CSRF protection
+  maxAge: 7 * 24 * 60 * 60 * 1000,          // 7 days (matches JWT expiry)
+  path: '/',
+});
+
 /**
  * GET /api/auth/google
  * Redirect to Google OAuth consent screen
@@ -74,20 +83,21 @@ router.get('/google/callback', async (req, res) => {
       });
     }
 
-    // Generate JWT
+    // Generate JWT — always set role to 'teacher' (role doesn't need to be in DB)
     const jwtToken = jwt.sign(
       {
         id: teacher.id,
         email: teacher.email,
         name: teacher.name,
-        role: teacher.role,
+        role: 'teacher',
       },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
     );
 
-    // Redirect to frontend with token
-    res.redirect(`${config.clientUrl}/auth/callback?token=${jwtToken}`);
+    // Set httpOnly cookie (prevents XSS token theft) and redirect
+    res.cookie('token', jwtToken, cookieOpts());
+    res.redirect(`${config.clientUrl}/auth/callback?success=true`);
   } catch (error) {
     console.error('Google OAuth error:', error);
     res.redirect(`${config.clientUrl}/login?error=auth_failed`);
@@ -105,7 +115,16 @@ router.get('/me', authenticate, (req, res) => {
   }
 
   const { googleTokens, ...safeTeacher } = teacher;
-  res.json({ user: safeTeacher });
+  res.json({ user: { ...safeTeacher, role: 'teacher' } });
+});
+
+/**
+ * POST /api/auth/logout
+ * Clear JWT cookie
+ */
+router.post('/logout', (req, res) => {
+  res.clearCookie('token', { httpOnly: true, path: '/' });
+  res.json({ success: true });
 });
 
 /**
@@ -119,7 +138,7 @@ router.put('/settings', authenticate, (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
   const { googleTokens, ...safeTeacher } = teacher;
-  res.json({ user: safeTeacher });
+  res.json({ user: { ...safeTeacher, role: 'teacher' } });
 });
 
 module.exports = router;

@@ -2,6 +2,7 @@ const {
   db,
   stmts,
   syncToCloud,
+  debouncedSync,
   serializeSession,
   deserializeSession,
   serializeTeacher,
@@ -34,6 +35,7 @@ function findTeacherById(id) {
 function addTeacher(teacher) {
   const t = serializeTeacher(teacher);
   stmts.insertTeacher.run(t.id, t.email, t.name, t.picture, t.google_tokens, t.settings, t.created_at);
+  debouncedSync();
   return teacher;
 }
 
@@ -43,6 +45,7 @@ function updateTeacher(id, updates) {
   const merged = { ...existing, ...updates };
   const row = serializeTeacher(merged);
   stmts.updateTeacher.run(row.email, row.name, row.picture, row.google_tokens, row.settings, id);
+  debouncedSync();
   return merged;
 }
 
@@ -56,6 +59,7 @@ function addSession(session) {
     s.spreadsheet_url, s.drive_folder, s.qr_code_data_url, s.attendance_url,
     s.created_at, s.expires_at, s.is_active, s.attendee_count
   );
+  debouncedSync();
   return session;
 }
 
@@ -87,6 +91,7 @@ function updateSessionFields(sessionId, updates) {
     sessionId
   );
 
+  debouncedSync();
   return { ...deserialized, ...updates };
 }
 
@@ -135,6 +140,7 @@ function addAttendanceRecord(record) {
     r.session_id, r.student_name, r.email, r.ip_address, r.mac_address,
     r.latitude, r.longitude, r.timestamp, r.status, r.violations
   );
+  debouncedSync();
   return result.lastInsertRowid;
 }
 
@@ -181,6 +187,7 @@ function addCheatingLog(log) {
     log.macAddress || null,
     log.timestamp || new Date().toISOString()
   );
+  debouncedSync();
   return result.lastInsertRowid;
 }
 
@@ -217,6 +224,7 @@ function getJsonStore(name) {
 function saveJsonStore(name, data) {
   const json = JSON.stringify(data);
   stmts.upsertJsonStore.run(name, json, json);
+  debouncedSync();
 }
 
 function getScheduleStore() { return getJsonStore('schedules'); }

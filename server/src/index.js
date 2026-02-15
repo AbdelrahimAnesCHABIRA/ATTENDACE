@@ -25,8 +25,18 @@ app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
-  contentSecurityPolicy: false,        // React app handles its own CSP
+  contentSecurityPolicy: config.nodeEnv === 'production' ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https://*.googleusercontent.com"],
+      connectSrc: ["'self'"],
+    },
+  } : false,
   crossOriginEmbedderPolicy: false,    // Allow loading Google profile images
+  hsts: config.nodeEnv === 'production' ? { maxAge: 31536000, includeSubDomains: true } : false,
 }));
 
 // CORS — needed in dev (different ports), same-origin in production
@@ -155,10 +165,15 @@ app.use((req, res) => {
   server.headersTimeout = 66000;
 
   // Graceful shutdown — flush cached data to disk + sync to cloud
-  function shutdown(signal) {
-    console.log(`\n${signal} received. Closing database...`);
+  async function shutdown(signal) {
+    console.log(`\n${signal} received. Syncing & closing database...`);
     ResourceManager.stopPeriodicCleanup();
     flushAllStores();   // WAL checkpoint + cloud sync
+
+    // Wait briefly for the cloud sync to complete
+    const { syncDatabase } = require('./services/database');
+    try { await syncDatabase(); } catch (e) { console.warn('[Shutdown] Final sync error:', e.message); }
+
     closeDatabase();    // Close SQLite connection
     console.log('Database closed. Shutting down.');
     server.close(() => process.exit(0));

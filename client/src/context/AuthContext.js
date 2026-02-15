@@ -8,46 +8,27 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      // Immediately restore cached user so the UI doesn't flash to login
-      const cachedUser = localStorage.getItem('user');
-      if (cachedUser) {
-        try {
-          setUser(JSON.parse(cachedUser));
-        } catch (e) { /* ignore bad JSON */ }
-      }
-
-      // Then validate with the server in the background
-      authAPI.getMe()
-        .then(res => {
-          setUser(res.data.user);
-          localStorage.setItem('user', JSON.stringify(res.data.user));
-        })
-        .catch((err) => {
-          // Only clear session on a definitive 401 (token invalid/expired)
-          if (err.response?.status === 401) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            setUser(null);
-          }
-          // For network errors or server down, keep the cached user
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    // Validate session with the server via httpOnly cookie.
+    // Cookie is sent automatically — no localStorage needed.
+    authAPI.getMe()
+      .then(res => {
+        setUser(res.data.user);
+      })
+      .catch(() => {
+        // No valid session — user needs to log in
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const login = (token, userData) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
+  const login = (userData) => {
     setUser(userData);
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const logout = async () => {
+    try {
+      await authAPI.logout();   // clears httpOnly cookie server-side
+    } catch (e) { /* ignore */ }
     setUser(null);
   };
 
