@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Pages
+import HeroPage from './pages/HeroPage';
 import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import Dashboard from './pages/Dashboard';
@@ -31,23 +32,43 @@ function ProtectedRoute({ children }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return children;
+}
+
+function HomeRedirect() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="loading-container">
+        <div className="spinner" />
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <HeroPage />;
+  }
+
+  return <Navigate to="/dashboard" replace />;
 }
 
 function AppRoutes() {
   return (
     <Routes>
       {/* Public routes */}
+      <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/attend/:sessionId" element={<StudentAttendance />} />
 
       {/* Protected teacher routes */}
       <Route
-        path="/"
+        path="/dashboard"
         element={
           <ProtectedRoute>
             <DashboardLayout />

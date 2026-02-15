@@ -25,7 +25,7 @@ export default function Login() {
   };
 
   if (user) {
-    window.location.href = '/';
+    window.location.href = '/dashboard';
     return null;
   }
 

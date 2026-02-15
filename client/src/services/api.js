@@ -14,7 +14,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Don't redirect if already on login/callback pages
       const path = window.location.pathname;
-      if (path !== '/login' && path !== '/auth/callback' && !path.startsWith('/attend/')) {
+      if (path !== '/' && path !== '/login' && path !== '/auth/callback' && !path.startsWith('/attend/')) {
         window.location.href = '/login';
       }
     }

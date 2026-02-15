@@ -12,17 +12,17 @@ import {
   LogOut,
   Menu,
   X,
-  GraduationCap,
 } from 'lucide-react';
+import AttendQRLogo from './AttendQRLogo';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Overview', end: true },
-  { to: '/schedule', icon: CalendarDays, label: 'Schedule' },
-  { to: '/qr-codes', icon: QrCode, label: 'QR Codes' },
-  { to: '/attendance', icon: ClipboardList, label: 'Attendance' },
-  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-  { to: '/cheating-logs', icon: ShieldAlert, label: 'Cheating Logs' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Overview', end: true },
+  { to: '/dashboard/schedule', icon: CalendarDays, label: 'Schedule' },
+  { to: '/dashboard/qr-codes', icon: QrCode, label: 'QR Codes' },
+  { to: '/dashboard/attendance', icon: ClipboardList, label: 'Attendance' },
+  { to: '/dashboard/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/dashboard/cheating-logs', icon: ShieldAlert, label: 'Cheating Logs' },
+  { to: '/dashboard/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function DashboardLayout() {
@@ -50,7 +50,7 @@ export default function DashboardLayout() {
         {/* Sidebar */}
         <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
           <div className="sidebar-logo">
-            <GraduationCap size={28} color="var(--primary)" />
+            <AttendQRLogo size={28} />
             <h1>AttendQR</h1>
           </div>
 

@@ -21,7 +21,7 @@ export default function AuthCallback() {
     authAPI.getMe()
       .then(res => {
         login(res.data.user);
-        navigate('/');
+        navigate('/dashboard');
       })
       .catch(() => {
         navigate('/login?error=auth_failed');
